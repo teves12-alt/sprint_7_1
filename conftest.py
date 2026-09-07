@@ -4,11 +4,9 @@ import string
 import requests
 from config import BASE_URL
 
-
-
 @pytest.fixture
 def courier_data():
-   
+    """Только генерирует уникальные данные. Ничего не отправляет."""
     suffix = ''.join(random.choices(string.ascii_lowercase, k=6))
     return {
         "login": f"courier_{suffix}",
@@ -16,52 +14,34 @@ def courier_data():
         "firstName": f"Name_{suffix}",
     }
 
-
-# 2. Сложная фикстура: готовит курьера (создаёт) и убирает за собой (удаляет)
 @pytest.fixture
 def registered_courier(courier_data):
+    """
+    Создает курьера ПЕРЕД тестом.
+    Удаляет курьера ПОСЛЕ теста (даже если тест упал).
+    Идеально для требования наставника.
+    """
     data = courier_data
     
-    # --- ЭТАП ПОДГОТОВКИ (SETUP) ---
-    # Пытаемся создать курьера
+    # --- SETUP ---
     response = requests.post(f"{BASE_URL}/courier", json=data)
-
+    
     if response.status_code == 201:
-        pass  # Отлично, курьер создан заново
+        pass  # Отлично, создан
     elif response.status_code == 409:
-        pass  # Ок, курьер уже есть (например, база не очистилась). 
-              # Мы НЕ падаем здесь, чтобы тест был устойчивым к порядку запуска.
+        pass  # Ок, уже есть (устойчивость к порядку запуска)
     else:
-        # Если сервер вернул что-то совсем странное (500, 400 и т.д.) — падаем
-        pytest.fail(
-            f"Не удалось подготовить курьера: статус {response.status_code}, "
-            f"ответ: {response.text}"
-        )
+        pytest.fail(f"Не удалось подготовить курьера: статус {response.status_code}")
     
-    # ВАЖНО: yield отдаёт данные тесту и ставит выполнение на паузу
-    yield data 
+    yield data  # Отдаем данные тесту
     
-    # --- ЭТАП ОЧИСТКИ (TEARDOWN) ---
-    # Этот блок выполнится ВСЕГДА после завершения теста (даже если тест упал)
+    # --- TEARDOWN (Очистка) ---
     try:
-        # Сначала нужно залогиниться, чтобы получить ID курьера для удаления
-        login_resp = requests.post(
-            f"{BASE_URL}/courier/login",
-            json={"login": data["login"], "password": data["password"]},
-        )
-        
+        # Логинимся, чтобы получить ID для удаления
+        login_resp = requests.post(f"{BASE_URL}/courier/login", json={"login": data["login"], "password": data["password"]})
         if login_resp.status_code == 200:
             courier_id = login_resp.json().get("id")
             if courier_id:
-                # Удаляем курьера
-                delete_resp = requests.delete(f"{BASE_URL}/courier/{courier_id}")
-                # Можно добавить проверку статуса удаления, если API это гарантирует
-        else:
-            # Если не смогли залогиниться, курьер может остаться в базе.
-            # Выводим предупреждение, но не ломаем тест, чтобы видеть реальные баги
-            print(f"⚠️ WARNING: Failed to login for cleanup. Courier '{data['login']}' might still exist. Status: {login_resp.status_code}")
-            
+                requests.delete(f"{BASE_URL}/courier/{courier_id}")
     except Exception as e:
-        # Ловим любые сетевые ошибки или таймауты
-        print(f"⚠️ WARNING: Unexpected error during cleanup for courier '{data['login']}': {e}")
-
+        print(f"⚠️ Warning: Failed to cleanup courier {data['login']}: {e}")
